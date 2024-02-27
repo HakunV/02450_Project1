@@ -1,7 +1,9 @@
 from ucimlrepo import fetch_ucirepo
 import importlib_resources
 import numpy as np
-from sklearn.feature_extraction.text import CountVectorizer
+from dtuimldmtools import similarity
+
+from matplotlib.pyplot import figure, legend, plot, show, title, xlabel, ylabel, axis, scatter
 
 filename = importlib_resources.files("dtuimldmtools").joinpath("data/glass.data")
 
@@ -25,21 +27,37 @@ print("Corpus (5 documents/sentences):")
 print(startMat)
 print()
 
+refractive_index = np.array(startMat[0, range(1, startMat.size, 11)])
 natrium = np.array(startMat[0, range(2, startMat.size, 11)])
+magnesium = np.array(startMat[0, range(3, startMat.size, 11)])
+aluminium = np.array(startMat[0, range(4, startMat.size, 11)])
+silicon = np.array(startMat[0, range(5, startMat.size, 11)])
+potassium = np.array(startMat[0, range(6, startMat.size, 11)])
+calcium = np.array(startMat[0, range(7, startMat.size, 11)])
+barium = np.array(startMat[0, range(8, startMat.size, 11)])
+iron = np.array(startMat[0, range(2, startMat.size, 11)])
 
-print(natrium)
-print(len(natrium[0]))
+refractive_index_mean = refractive_index.mean()
+refractive_index_var = refractive_index.var()
+refractive_index_std = refractive_index.std(ddof=1)
 
-# fetch dataset 
-glass_identification = fetch_ucirepo(id=42) 
-  
-# data (as pandas dataframes) 
-X = glass_identification.data.features 
-y = glass_identification.data.targets 
-  
+natrium_mean = natrium.mean()
+natrium_var = natrium.var()
+natrium_std = natrium.std(ddof=1)
 
-# # metadata 
-# print(glass_identification.metadata) 
-  
-# # variable information
-# print(glass_identification.variables) 
+magnesium_mean = magnesium.mean()
+magnesium_var = magnesium.var()
+magnesium_std = magnesium.std(ddof=1)
+
+aluminium_mean = aluminium.mean()
+aluminium = aluminium.var()
+magnesium_std = aluminium.std(ddof=1)
+
+figure()
+title("Refractive index")
+
+scatter(refractive_index[0, :], refractive_index[0, :])
+
+axis("tight")
+
+show()
