@@ -36,7 +36,7 @@ N = len(y)
 M = len(attributeNames)
 C = len(classNames)
 
-# Regression Part a: Linear Regression, trying to predict the amount of sodium in the glass
+# Regression Part a: Linear Regression, trying to predict the refractive index of the glass
 
 X_stand = X - np.ones((N, 1)) * X.mean(axis=0)
 X_stand = X_stand * (1 / np.std(X_stand, 0))
