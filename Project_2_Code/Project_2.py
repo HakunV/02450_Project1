@@ -51,7 +51,7 @@ y_reg = X_stand[:, refractive_idx]
 X_cols = list(range(0, refractive_idx)) + list(range(refractive_idx+1, len(attributeNames)))
 X_stand = X_stand[:, X_cols]
 
-attributeNames = attributeNames[1:9]
+attributeNames = attributeNames[1:len(X_cols)+1]
 M = M - 1
 
 model = lm.LinearRegression()
@@ -60,13 +60,13 @@ model.fit(X_stand, y_reg)
 y_est = model.predict(X_stand)
 residual = y_est - y_reg
 
-figure()
-subplot(2, 1, 1)
-plot(y_reg, y_est, ".")
-xlabel("Refractive index (true)")
-ylabel("Refractive index (estimated)")
-subplot(2, 1, 2)
-hist(residual, 40)
+# figure()
+# subplot(2, 1, 1)
+# plot(y_reg, y_est, ".")
+# xlabel("Refractive index (true)")
+# ylabel("Refractive index (estimated)")
+# subplot(2, 1, 2)
+# hist(residual, 40)
 
 # Add offset attribute
 X_stand_off = np.concatenate((np.ones((X_stand.shape[0], 1)), X_stand), 1)
@@ -151,7 +151,7 @@ for train_index, test_index in CV.split(X_stand_off, y_reg):
         grid()
         # You can choose to display the legend, but it's omitted for a cleaner
         # plot, since there are many attributes
-        # legend(attributeNames[1:], loc='best')
+        legend(attributeNames[1:], loc='best')
 
         subplot(1, 2, 2)
         title("Optimal lambda: 1e{0}".format(np.log10(opt_lambda)))
