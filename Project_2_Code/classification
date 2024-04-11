@@ -1,56 +1,80 @@
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, KFold, cross_val_score
-from sklearn.linear_model import LogisticRegressionCV
+import importlib_resources
+from sklearn import model_selection
+from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import StandardScaler
-from scipy.stats import ttest_rel
+from sklearn.dummy import DummyClassifier
 import matplotlib.pyplot as plt
-import importlib_resources
+from scipy import stats
 
-# Load the dataset
+# Adjusted loading of the dataset
 filename = importlib_resources.files("dtuimldmtools").joinpath("data/glass.data")
 data = pd.read_csv(filename, sep=",", header=None, index_col=0)
 
-# Adjusting class labels similar to the regression part
+# Adjust class numbers due to missing class 4
 data[10] = data[10].replace({5: 4, 6: 5, 7: 6})
 
+# Preparing data
 X = data.iloc[:, :-1].values
 y = data.iloc[:, -1].values
 
-# Standardize features
-scaler = StandardScaler().fit(X)
-X_std = scaler.transform(X)  # Standardized dataset
+# Set attribute and class names (for plotting)
+attributeNames = ["Ri", "Na", "Mg", "Al", "Si", "K", "Ca", "Ba", "Fe"]
+classNames = ["building_windows_float_processed", "building_windows_non_float_processed",
+              "vehicle_windows_float_processed", "containers", "tableware", "headlamps"]
 
-# Logistic Regression with Cross-Validation for regularization strength
-log_reg_cv = LogisticRegressionCV(cv=5, max_iter=10000, random_state=42).fit(X_std, y)
+# Convert class labels from original to {0,1,...,C-1}
+classLabels = np.unique(y)
+classDict = dict(zip(classLabels, range(len(classLabels))))
+y = np.array([classDict[cl] for cl in y])
 
-# Finding the best k for k-Nearest Neighbors using cross-validation
-k_values = range(1, 11)
-best_score = 0
-best_k = 1
-kf = KFold(n_splits=10, shuffle=True, random_state=42)
-for k in k_values:
-    knn = KNeighborsClassifier(n_neighbors=k)
-    scores = cross_val_score(knn, X_std, y, cv=kf, scoring='accuracy')
-    mean_score = scores.mean()
-    if mean_score > best_score:
-        best_score = mean_score
-        best_k = k
-knn_best = KNeighborsClassifier(n_neighbors=best_k)
+# Initialize cross-validation method
+K = 10
+CV = model_selection.StratifiedKFold(K, shuffle=True)
 
-# Perform cross-validation for statistical comparison between Logistic Regression CV and best KNN
-log_reg_scores = cross_val_score(log_reg_cv, X_std, y, cv=kf, scoring='accuracy')
-knn_best_scores = cross_val_score(knn_best, X_std, y, cv=kf, scoring='accuracy')
+# Initialize models
+logistic_model = LogisticRegression(max_iter=10000)
+dummy_model = DummyClassifier(strategy='most_frequent')
+knn_model = KNeighborsClassifier(n_neighbors=5)  # Using K=5 for KNN
 
-# Statistical test
-t_stat, p_val = ttest_rel(log_reg_scores, knn_best_scores)
-print(f'Paired t-test between Logistic Regression CV and best KNN (k={best_k}) p-value: {p_val:.4f}')
+# Initialize variables for performance tracking
+logistic_errors = np.zeros(K)
+dummy_errors = np.zeros(K)
+knn_errors = np.zeros(K)
 
-# Visualization
-plt.figure(figsize=(10, 6))
-plt.boxplot([log_reg_scores, knn_best_scores], labels=['Logistic Regression CV', f'Best KNN (k={best_k})'])
-plt.ylabel('Accuracy')
-plt.title('Model Comparison')
+k = 0
+for (train_index, test_index) in CV.split(X, y):
+    X_train, y_train = X[train_index, :], y[train_index]
+    X_test, y_test = X[test_index, :], y[test_index]
+
+    # Train models
+    logistic_model.fit(X_train, y_train)
+    dummy_model.fit(X_train, y_train)
+    knn_model.fit(X_train, y_train)
+
+    # Predict and calculate error rates
+    logistic_errors[k] = 1 - accuracy_score(y_test, logistic_model.predict(X_test))
+    dummy_errors[k] = 1 - accuracy_score(y_test, dummy_model.predict(X_test))
+    knn_errors[k] = 1 - accuracy_score(y_test, knn_model.predict(X_test))
+
+    k += 1
+
+# Output average error rates
+print(f'Logistic Regression error rate: {logistic_errors.mean()}')
+print(f'Dummy (Baseline) error rate: {dummy_errors.mean()}')
+print(f'KNN error rate: {knn_errors.mean()}')
+
+# Statistical evaluation
+# Paired t-test between Logistic Regression and KNN
+t_stat, p_val = stats.ttest_rel(logistic_errors, knn_errors)
+print(f'Paired t-test between Logistic Regression and KNN, p-value: {p_val}')
+
+# Displaying results in a plot for visualization
+plt.figure(figsize=(12, 6))
+plt.boxplot([logistic_errors, dummy_errors, knn_errors])
+plt.xticks([1, 2, 3], ['Logistic Regression', 'Dummy', 'KNN'])
+plt.ylabel('Error rate')
+plt.title('Model comparison on Glass Identification Dataset')
 plt.show()
