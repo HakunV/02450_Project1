@@ -8,6 +8,7 @@ import pandas as pd
 import sklearn.linear_model as lm
 import torch
 from tabulate import tabulate
+import scipy.stats as st
 
 from sklearn import model_selection
 from dtuimldmtools import (
@@ -62,25 +63,32 @@ color_list = [
 # Linear Regression, trying to predict the refractive index of the glass
 
 # X_stand = X - np.ones((N, 1)) * X.mean(axis=0)
-# X_stand = X_stand * (1 / np.std(X_stand, 0))
+# X_stand = X_stand / np.std(X_stand, 0)
 
 refractive_idx = attributeNames.index("Ri")
 y_reg = X[:, refractive_idx]
 
+# y_reg_stand = X_stand[:, refractive_idx]
+
 X_cols = list(range(0, refractive_idx)) + list(range(refractive_idx+1, len(attributeNames)))
 X = X[:, X_cols]
+
+# X_stand = X_stand[:, X_cols]
 
 attributeNames = attributeNames[1:len(X_cols)+1]
 M = M - 1
 
 # Add offset attribute
 X_off = np.concatenate((np.ones((X.shape[0], 1)), X), 1)
+
+# X_stand_off = np.concatenate((np.ones((X_stand.shape[0], 1)), X_stand), 1)
+
 attributeNames = ["Offset"] + attributeNames
 M = M + 1
 
-## Crossvalidation
+# Crossvalidation
 # Create crossvalidation partition for evaluation
-K = 10
+K = 5
 outer_CV = model_selection.KFold(K, shuffle=True)
 # CV = model_selection.KFold(K, shuffle=False)
 
@@ -103,10 +111,17 @@ Error_test_nofeatures = np.empty((K, 1))
 w_rlr = np.empty((M, K))
 w_noreg = np.empty((M, K))
 
+outer_mu_rlr = np.empty((K, M - 1))
+outer_sigma_rlr = np.empty((K, M - 1))
+outer_mu_ann = np.empty((K, M - 1))
+outer_sigma_ann = np.empty((K, M - 1))
+inner_mu = np.empty((K, M - 1))
+inner_sigma = np.empty((K, M - 1))
+
 opt_lambdas = np.empty((K, 1))
 opt_hiddens = np.empty((K, 1))
 
-errors_ann = []  # make a list for storing generalizaition error for ann in each loop
+errors_ann = np.empty((K, 1))  # make a list for storing generalizaition error for ann in each loop
 
 k = 0
 for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
@@ -115,25 +130,6 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
     outer_y_train = y_reg[outer_train_index]
     outer_X_test = X_off[outer_test_index]
     outer_y_test = y_reg[outer_test_index]
-    
-    # For part A
-    # internal_cross_validation = 10
-    
-    # (
-    #     opt_val_err,
-    #     opt_lambda,
-    #     mean_w_vs_lambda,
-    #     train_err_vs_lambda,
-    #     test_err_vs_lambda,
-    # ) = rlr_validate(outer_X_train, outer_y_train, lambdas, internal_cross_validation)
-    
-    outer_X_train_ten = torch.Tensor(X_off[outer_train_index, :])
-    outer_y_train_ten = torch.Tensor(y_reg[outer_train_index])
-    outer_X_test_ten = torch.Tensor(X_off[outer_test_index, :])
-    outer_y_test_ten = torch.Tensor(y_reg[outer_test_index])
-
-    Xty = outer_X_train.T @ outer_y_train
-    XtX = outer_X_train.T @ outer_X_train
     
     inner_CV = model_selection.KFold(K, shuffle=True)
     
@@ -148,13 +144,6 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
         
         inner_X_train = outer_X_train[inner_train_index]
         inner_y_train = outer_y_train[inner_train_index]
-        inner_X_test = outer_X_train[inner_test_index]
-        inner_y_test = outer_y_train[inner_test_index]
-        
-        inner_X_train_ten = torch.Tensor(outer_X_train[inner_train_index, :])
-        inner_y_train_ten = torch.Tensor(outer_y_train[inner_train_index])
-        inner_X_test_ten = torch.Tensor(outer_X_train[inner_test_index, :])
-        inner_y_test_ten = torch.Tensor(outer_y_train[inner_test_index])
         
         (
             opt_val_err,
@@ -162,19 +151,28 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
             mean_w_vs_lambda,
             train_err_vs_lambda,
             test_err_vs_lambda,
-        ) = rlr_validate(outer_X_train, outer_y_train, lambdas)
+        ) = rlr_validate(inner_X_train, inner_y_train, lambdas)
         
         if opt_val_err < error_val_rlr:
             error_val_rlr = opt_val_err
             opt_lambda_rlr = opt_lambda
+        
+        inner_mu[i, :] = np.mean(outer_X_train[:, 1:], 0)
+        inner_sigma[i, :] = np.std(outer_X_train[:, 1:], 0)
+
+        outer_X_train_stand = (outer_X_train[:, 1:] - inner_mu[i, :]) / inner_sigma[i, :]
+        outer_X_train_stand = np.concatenate((np.ones((outer_X_train_stand.shape[0], 1)), outer_X_train_stand), 1)
+            
+        inner_X_train_ten = torch.Tensor(outer_X_train_stand[inner_train_index, :])
+        inner_y_train_ten = torch.Tensor(outer_y_train[inner_train_index]).unsqueeze(1)
             
         model = lambda: torch.nn.Sequential(
             torch.nn.Linear(M, hidden_units[i]),  # M features to n_hidden_units
             torch.nn.Tanh(),  # 1st transfer function,
             torch.nn.Linear(hidden_units[i], 1),  # n_hidden_units to 1 output neuron
-            # no final tranfer function, i.e. "linear output"
+            # no final transfer function, i.e. "linear output"
         )
-        loss_fn = torch.nn.MSELoss()  # notice how this is now a mean-squared-error loss
+        loss_fn = torch.nn.MSELoss()  # This is now a mean-squared-error loss
         
         net, final_loss, learning_curve = train_neural_net(
             model,
@@ -194,11 +192,32 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
     opt_lambdas[k] = opt_lambda_rlr
     opt_hiddens[k] = opt_h
     
+    # Standardize
+    outer_mu_rlr[k, :] = np.mean(outer_X_train[:, 1:], 0)
+    outer_sigma_rlr[k, :] = np.std(outer_X_train[:, 1:], 0)
+    
+    outer_X_train[:, 1:] = (outer_X_train[:, 1:] - outer_mu_rlr[k, :]) / outer_sigma_rlr[k, :]
+    outer_X_test[:, 1:] = (outer_X_test[:, 1:] - outer_mu_rlr[k, :]) / outer_sigma_rlr[k, :]
+    
+    Xty = outer_X_train.T @ outer_y_train
+    XtX = outer_X_train.T @ outer_X_train
+    
+    outer_mu_ann[k, :] = np.mean(X_off[:, 1:], 0)
+    outer_sigma_ann[k, :] = np.std(X_off[:, 1:], 0)
+
+    X_stand = (X_off[:, 1:] - outer_mu_ann[k, :]) / outer_sigma_ann[k, :]
+    X_stand = np.concatenate((np.ones((X_stand.shape[0], 1)), X_stand), 1)
+    
+    outer_X_train_ten = torch.Tensor(X_stand[outer_train_index, :])
+    outer_y_train_ten = torch.Tensor(y_reg[outer_train_index]).unsqueeze(1)
+    outer_X_test_ten = torch.Tensor(X_stand[outer_test_index, :])
+    outer_y_test_ten = torch.Tensor(y_reg[outer_test_index]).unsqueeze(1)
+    
     model = lambda: torch.nn.Sequential(
         torch.nn.Linear(M, opt_h),  # M features to n_hidden_units
         torch.nn.Tanh(),  # 1st transfer function,
         torch.nn.Linear(opt_h, 1),  # n_hidden_units to 1 output neuron
-        # no final tranfer function, i.e. "linear output"
+        # no final transfer function, i.e. "linear output"
     )
     loss_fn = torch.nn.MSELoss()  # notice how this is now a mean-squared-error loss
     
@@ -253,13 +272,24 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
         legend(["Train error", "Validation error"])
         grid()
         
-    # Determine estimated class labels for test set
+        print("Best Weights:")
+        for m in range(M):
+            print("{:>15} {:>15}".format(attributeNames[m], np.round(w_rlr[m, -1], 5)))
+        
+        y_est_rlr = outer_X_test @ w_rlr[:, k]
+
+        figure()
+        title("Best Weights Predictions")
+        plot(outer_y_test, y_est_rlr, ".g")
+        xlabel("Refractive index (true)")
+        ylabel("Refractive index (estimated)")
+
     y_test_est = net(outer_X_test_ten)
 
-    # Determine errors and errors
+    # Determine errors
     se = (y_test_est.float() - outer_y_test_ten.float()) ** 2  # squared error
     mse = (sum(se).type(torch.float) / len(outer_y_test_ten)).data.numpy() # mean
-    errors_ann.append(mse)  # store error rate for current CV fold
+    errors_ann[k] = mse  # store error rate for current CV fold
 
     # Display the learning curve for the best net in the current fold
     (h,) = summaries_axes[0].plot(learning_curve, color=color_list[k])
@@ -269,22 +299,24 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
     summaries_axes[0].set_ylabel("Loss")
     summaries_axes[0].set_title("Learning curves")
     
-        
-    # To inspect the used indices, use these print statements
     print('Cross validation fold {0}/{1}:'.format(k+1,K))
-    # print('Train indices: {0}'.format(outer_train_index))
-    # print('Test indices: {0}\n'.format(outer_test_index))
 
     k += 1
-    
+
+
+print("Optimal Hidden Units")
 print(opt_hiddens)    
 
+print("Optimal Lambdas")
 print(opt_lambdas)
 
+print("Optimal Error RLR")
 print(Error_test_rlr)
 
+print("Optimal Error Baseline")
 print(Error_test_nofeatures)
 
+print("Optimal Error ANN")
 print(errors_ann)
 
 # Display results
@@ -304,8 +336,29 @@ print(
     )
 )
 
-print("Weights in last fold:")
-for m in range(M):
-    print("{:>15} {:>15}".format(attributeNames[m], np.round(w_rlr[m, -1], 5)))
-
 show()
+
+
+alpha = 0.05
+
+z_LandA = Error_test_rlr - errors_ann
+CI_LandA = st.t.interval(
+    1 - alpha, len(z_LandA) - 1, loc=np.mean(z_LandA), scale=st.sem(z_LandA)
+)
+p_LandA = 2 * st.t.cdf(-np.abs(np.mean(z_LandA)) / st.sem(z_LandA), df=len(z_LandA) - 1)
+
+z_LandB = Error_test_rlr - Error_test_nofeatures
+CI_LandB = st.t.interval(
+    1 - alpha, len(z_LandB) - 1, loc=np.mean(z_LandB), scale=st.sem(z_LandB)
+)
+p_LandB = 2 * st.t.cdf(-np.abs(np.mean(z_LandB)) / st.sem(z_LandB), df=len(z_LandB) - 1)
+
+z_AandB = errors_ann - Error_test_nofeatures
+CI_AandB = st.t.interval(
+    1 - alpha, len(z_AandB) - 1, loc=np.mean(z_AandB), scale=st.sem(z_AandB)
+)
+p_AandB = 2 * st.t.cdf(-np.abs(np.mean(z_AandB)) / st.sem(z_AandB), df=len(z_AandB) - 1)
+
+
+print(CI_LandA)
+print(p_LandA)
