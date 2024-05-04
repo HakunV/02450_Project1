@@ -32,7 +32,7 @@ y = np.array([classDict[cl] for cl in y])
 
 # Initialize cross-validation method
 K = 10
-CV = model_selection.StratifiedKFold(K, shuffle=True)
+CV = model_selection.StratifiedKFold(n_splits=K, shuffle=True)
 
 # Initialize models
 logistic_model = LogisticRegression(max_iter=10000)
@@ -43,6 +43,7 @@ knn_model = KNeighborsClassifier(n_neighbors=5)  # Using K=5 for KNN
 logistic_errors = np.zeros(K)
 dummy_errors = np.zeros(K)
 knn_errors = np.zeros(K)
+fold_details = []
 
 k = 0
 for (train_index, test_index) in CV.split(X, y):
@@ -55,9 +56,16 @@ for (train_index, test_index) in CV.split(X, y):
     knn_model.fit(X_train, y_train)
 
     # Predict and calculate error rates
-    logistic_errors[k] = 1 - accuracy_score(y_test, logistic_model.predict(X_test))
-    dummy_errors[k] = 1 - accuracy_score(y_test, dummy_model.predict(X_test))
-    knn_errors[k] = 1 - accuracy_score(y_test, knn_model.predict(X_test))
+    logistic_error = 1 - accuracy_score(y_test, logistic_model.predict(X_test))
+    dummy_error = 1 - accuracy_score(y_test, dummy_model.predict(X_test))
+    knn_error = 1 - accuracy_score(y_test, knn_model.predict(X_test))
+    
+    logistic_errors[k] = logistic_error
+    dummy_errors[k] = dummy_error
+    knn_errors[k] = knn_error
+
+    # Store fold results
+    fold_details.append((k+1, logistic_error, knn_error, dummy_error))
 
     k += 1
 
@@ -71,10 +79,14 @@ print(f'KNN error rate: {knn_errors.mean()}')
 t_stat, p_val = stats.ttest_rel(logistic_errors, knn_errors)
 print(f'Paired t-test between Logistic Regression and KNN, p-value: {p_val}')
 
+# Print detailed fold results
+print("Fold | Logistic Regression Error | KNN Error | Baseline Error")
+for detail in fold_details:
+    print(f"{detail[0]} | {detail[1]:.3f} | {detail[2]:.3f} | {detail[3]:.3f}")
+
 # Displaying results in a plot for visualization
 plt.figure(figsize=(12, 6))
-plt.boxplot([logistic_errors, dummy_errors, knn_errors])
-plt.xticks([1, 2, 3], ['Logistic Regression', 'Dummy', 'KNN'])
+plt.boxplot([logistic_errors, dummy_errors, knn_errors], labels=['Logistic Regression', 'Dummy', 'KNN'])
 plt.ylabel('Error rate')
 plt.title('Model comparison on Glass Identification Dataset')
 plt.show()
