@@ -17,7 +17,7 @@ from dtuimldmtools import (
     train_neural_net,  
 )
 
-from matplotlib.pyplot import figure, legend, plot, show, title, xlabel, ylabel, axis, grid, bar, xticks, table, hist, ylim, subplot, subplots, boxplot, scatter, loglog, semilogx
+from matplotlib.pyplot import figure, legend, plot, show, title, xlabel, ylabel, axis, grid, bar, xticks, table, hist, ylim, subplot, subplots, boxplot, scatter, loglog, semilogx, errorbar
 
 filename = importlib_resources.files("dtuimldmtools").joinpath("data/glass.data")
 
@@ -62,18 +62,11 @@ color_list = [
 
 # Linear Regression, trying to predict the refractive index of the glass
 
-# X_stand = X - np.ones((N, 1)) * X.mean(axis=0)
-# X_stand = X_stand / np.std(X_stand, 0)
-
 refractive_idx = attributeNames.index("Ri")
 y_reg = X[:, refractive_idx]
 
-# y_reg_stand = X_stand[:, refractive_idx]
-
 X_cols = list(range(0, refractive_idx)) + list(range(refractive_idx+1, len(attributeNames)))
 X = X[:, X_cols]
-
-# X_stand = X_stand[:, X_cols]
 
 attributeNames = attributeNames[1:len(X_cols)+1]
 M = M - 1
@@ -81,14 +74,12 @@ M = M - 1
 # Add offset attribute
 X_off = np.concatenate((np.ones((X.shape[0], 1)), X), 1)
 
-# X_stand_off = np.concatenate((np.ones((X_stand.shape[0], 1)), X_stand), 1)
-
 attributeNames = ["Offset"] + attributeNames
 M = M + 1
 
 # Crossvalidation
 # Create crossvalidation partition for evaluation
-K = 5
+K = 6
 outer_CV = model_selection.KFold(K, shuffle=True)
 # CV = model_selection.KFold(K, shuffle=False)
 
@@ -122,6 +113,14 @@ opt_lambdas = np.empty((K, 1))
 opt_hiddens = np.empty((K, 1))
 
 errors_ann = np.empty((K, 1))  # make a list for storing generalizaition error for ann in each loop
+
+CI_LandA_arr = np.empty((K, 2))
+CI_LandB_arr = np.empty((K, 2))
+CI_AandB_arr = np.empty((K, 2))
+
+p_LandA_arr = np.empty((K, 1))
+p_LandB_arr = np.empty((K, 1))
+p_AandB_arr = np.empty((K, 1))
 
 k = 0
 for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
@@ -299,9 +298,91 @@ for outer_train_index, outer_test_index in outer_CV.split(X_off, y_reg):
     summaries_axes[0].set_ylabel("Loss")
     summaries_axes[0].set_title("Learning curves")
     
+    # Statistical evaluation
+    z_rlr = np.abs(outer_y_test - outer_X_test @ w_rlr[:, k]) ** 2
+    
+    z_ann = np.array(se.detach()).reshape(-1)
+        
+    z_base = np.abs(outer_y_test - outer_y_train.mean()) ** 2
+    
+    alpha = 0.05
+
+    print("Length:")
+    print(len(z_ann))
+
+    z_LandA = z_rlr - z_ann
+    lower, upper = st.t.interval(
+        1 - alpha, len(z_LandA) - 1, loc=np.mean(z_LandA), scale=st.sem(z_LandA)
+    )
+    CI_LandA_arr[k, 0] = lower
+    CI_LandA_arr[k, 1] = upper
+    
+    p_LandA_arr[k] = 2 * st.t.cdf(-np.abs(np.mean(z_LandA)) / st.sem(z_LandA), df=len(z_LandA) - 1)
+
+    
+    z_LandB = z_rlr - z_base
+    lower, upper = st.t.interval(
+        1 - alpha, len(z_LandB) - 1, loc=np.mean(z_LandB), scale=st.sem(z_LandB)
+    )
+    CI_LandB_arr[k, 0] = lower
+    CI_LandB_arr[k, 1] = upper
+    
+    p_LandB_arr[k] = 2 * st.t.cdf(-np.abs(np.mean(z_LandB)) / st.sem(z_LandB), df=len(z_LandB) - 1)
+    
+    
+    z_AandB = z_ann - z_base
+    lower, upper = st.t.interval(
+        1 - alpha, len(z_AandB) - 1, loc=np.mean(z_AandB), scale=st.sem(z_AandB)
+    )
+    CI_AandB_arr[k, 0] = lower
+    CI_AandB_arr[k, 1] = upper
+    
+    p_AandB_arr[k] = 2 * st.t.cdf(-np.abs(np.mean(z_AandB)) / st.sem(z_AandB), df=len(z_AandB) - 1)
+    
+    
     print('Cross validation fold {0}/{1}:'.format(k+1,K))
 
     k += 1
+
+# Number of intervals
+n_intervals = CI_LandA_arr.shape[0]
+
+# Create an array of x values (e.g., [0, 1] to represent each interval)
+x_values = np.arange(n_intervals)
+
+# Extract lower and upper bounds from the confidence intervals
+lower_bounds_LandA = CI_LandA_arr[:, 0]
+upper_bounds_LandA = CI_LandA_arr[:, 1]
+
+lower_bounds_LandB = CI_LandB_arr[:, 0]
+upper_bounds_LandB = CI_LandB_arr[:, 1]
+
+lower_bounds_AandB = CI_AandB_arr[:, 0]
+upper_bounds_AandB = CI_AandB_arr[:, 1]
+
+# Plot the confidence intervals
+figure()
+subplot(1, 3, 1)
+title("RLR and ANN")
+errorbar(x_values, (lower_bounds_LandA + upper_bounds_LandA) / 2, yerr=[(upper_bounds_LandA - lower_bounds_LandA) / 2], fmt='o', capsize=5)
+xticks(x_values, ['Interval 1', 'Interval 2', 'Interval 3', 'Interval 4', 'Interval 5', 'Interval 6'])
+xlabel('Intervals')
+ylabel('Generalization Error')
+
+subplot(1, 3, 2)
+title("RLR and Baseline")
+errorbar(x_values, (lower_bounds_LandB + upper_bounds_LandB) / 2, yerr=[(upper_bounds_LandB - lower_bounds_LandB) / 2], fmt='o', capsize=5)
+xticks(x_values, ['Interval 1', 'Interval 2', 'Interval 3', 'Interval 4', 'Interval 5', 'Interval 6'])
+xlabel('Intervals')
+ylabel('Generalization Error')
+
+subplot(1, 3, 3)
+title("ANN and Baseline")
+errorbar(x_values, (lower_bounds_AandB + upper_bounds_AandB) / 2, yerr=[(upper_bounds_AandB - lower_bounds_AandB) / 2], fmt='o', capsize=5)
+xticks(x_values, ['Interval 1', 'Interval 2', 'Interval 3', 'Interval 4', 'Interval 5', 'Interval 6'])
+xlabel('Intervals')
+ylabel('Generalization Error')
+
 
 
 print("Optimal Hidden Units")
@@ -336,29 +417,22 @@ print(
     )
 )
 
+print("Confidence intervals between RLR and ANN")
+print(CI_LandA_arr)
+
+print("p-values between RLR and ANN")
+print(p_LandA_arr)
+
+print("Confidence intervals between RLR and Baseline")
+print(CI_LandB_arr)
+
+print("p-values between RLR and Baseline")
+print(p_LandB_arr)
+
+print("Confidence intervals between ANN and Baseline")
+print(CI_AandB_arr)
+
+print("p-values between ANN and Baseline")
+print(p_AandB_arr)
+
 show()
-
-
-alpha = 0.05
-
-z_LandA = Error_test_rlr - errors_ann
-CI_LandA = st.t.interval(
-    1 - alpha, len(z_LandA) - 1, loc=np.mean(z_LandA), scale=st.sem(z_LandA)
-)
-p_LandA = 2 * st.t.cdf(-np.abs(np.mean(z_LandA)) / st.sem(z_LandA), df=len(z_LandA) - 1)
-
-z_LandB = Error_test_rlr - Error_test_nofeatures
-CI_LandB = st.t.interval(
-    1 - alpha, len(z_LandB) - 1, loc=np.mean(z_LandB), scale=st.sem(z_LandB)
-)
-p_LandB = 2 * st.t.cdf(-np.abs(np.mean(z_LandB)) / st.sem(z_LandB), df=len(z_LandB) - 1)
-
-z_AandB = errors_ann - Error_test_nofeatures
-CI_AandB = st.t.interval(
-    1 - alpha, len(z_AandB) - 1, loc=np.mean(z_AandB), scale=st.sem(z_AandB)
-)
-p_AandB = 2 * st.t.cdf(-np.abs(np.mean(z_AandB)) / st.sem(z_AandB), df=len(z_AandB) - 1)
-
-
-print(CI_LandA)
-print(p_LandA)
